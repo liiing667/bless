@@ -6,6 +6,9 @@
 import base64
 
 import os
+from marshmallow import ValidationError
+
+from bless.request.bless_request_common import validate_ip_list
 from bless.ssh.protocol.ssh_protocol import pack_ssh_string, pack_ssh_uint64, pack_ssh_uint32
 
 
@@ -107,6 +110,11 @@ class SSHCertificateBuilder(object):
         :param valid_principal: String with the username or hostname.
         """
         if valid_principal:
+            if ',' in valid_principal:
+                # A comma is the delimiter between principals when a certificate is inspected
+                # (e.g. ssh-keygen -L), so a principal containing one would make the principal
+                # boundaries ambiguous.
+                raise ValueError("Principal {} contains an invalid ','.".format(valid_principal))
             if valid_principal not in self.valid_principals:
                 self.valid_principals.append(valid_principal)
             else:
@@ -152,6 +160,12 @@ class SSHCertificateBuilder(object):
         :param address: String of one or more comma-separated IPs or CIDRs.
         """
         if address:
+            try:
+                # Use the same canonical validation as the request schemas, so a certificate
+                # can never carry a source-address scope that differs from what was validated.
+                validate_ip_list(address)
+            except ValidationError as e:
+                raise ValueError(str(e))
             self.critical_option_source_address = address
         else:
             raise ValueError("Provide a non-null string")

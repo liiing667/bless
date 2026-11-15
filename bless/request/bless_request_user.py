@@ -6,11 +6,11 @@
 import re
 from enum import Enum
 
-import ipaddress
 from bless.config.bless_config import USERNAME_VALIDATION_OPTION, REMOTE_USERNAMES_VALIDATION_OPTION, \
     USERNAME_VALIDATION_DEFAULT, REMOTE_USERNAMES_VALIDATION_DEFAULT, REMOTE_USERNAMES_BLACKLIST_OPTION, \
     REMOTE_USERNAMES_BLACKLIST_DEFAULT
-from bless.request.bless_request_common import validate_ssh_public_key
+from bless.request.bless_request_common import validate_ssh_public_key, validate_ip_list, \
+    validate_principal, PRINCIPAL_PATTERN  # noqa: F401 (PRINCIPAL_PATTERN re-exported for compatibility)
 from marshmallow import Schema, fields, post_load, ValidationError, validates_schema
 from marshmallow import validates
 from marshmallow.validate import Email
@@ -26,10 +26,6 @@ USERNAME_PATTERN = re.compile(r'[a-z_][a-z0-9_-]*[$]?\Z')
 # default algorithm for the definition of the user's home directory.
 USERNAME_PATTERN_DEBIAN = re.compile(r'\A[^-+~][^:,\s]*\Z')
 
-# It appears that most printable ascii is valid, excluding whitespace, #, and commas.
-# There doesn't seem to be any practical size limits of an SSH Certificate Principal (> 4096B allowed).
-PRINCIPAL_PATTERN = re.compile(r'[\d\w!"$%&\'()*+\-./:;<=>?@\[\\\]\^`{|}~]+\Z')
-
 USERNAME_VALIDATION_OPTIONS = Enum('UserNameValidationOptions',
                                    'useradd '  # Allowable usernames per 'man 8 useradd'
                                    'debian '  # Allowable usernames on debian systems.
@@ -39,11 +35,7 @@ USERNAME_VALIDATION_OPTIONS = Enum('UserNameValidationOptions',
 
 
 def validate_ips(ips):
-    try:
-        for ip in ips.split(','):
-            ipaddress.ip_network(ip, strict=True)
-    except ValueError:
-        raise ValidationError('Invalid IP address.')
+    validate_ip_list(ips)
 
 
 def validate_user(user, username_validation, username_blacklist=None):
@@ -78,8 +70,7 @@ def _validate_user_debian(user):
 
 
 def _validate_principal(principal):
-    if PRINCIPAL_PATTERN.match(principal) is None:
-        raise ValidationError('Principal contains invalid characters.')
+    validate_principal(principal)
 
 
 class BlessUserSchema(Schema):
@@ -119,8 +110,15 @@ class BlessUserSchema(Schema):
             username_blacklist = self.context[REMOTE_USERNAMES_BLACKLIST_OPTION]
         else:
             username_blacklist = REMOTE_USERNAMES_BLACKLIST_DEFAULT
-        for remote_username in remote_usernames.split(','):
+        usernames = remote_usernames.split(',')
+        for remote_username in usernames:
             validate_user(remote_username, username_validation, username_blacklist)
+            if not remote_username:
+                # validate_user() permits empty strings when validation is disabled, but the
+                # SSH Certificate Builder cannot encode an empty principal.
+                raise ValidationError('Principal contains invalid characters.')
+        if len(usernames) != len(set(usernames)):
+            raise ValidationError('Duplicate remote usernames are not allowed.')
 
 
 class BlessUserRequest:

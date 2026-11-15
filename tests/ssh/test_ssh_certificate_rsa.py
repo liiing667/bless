@@ -66,6 +66,11 @@ def test_valid_principals():
         cert.add_valid_principal(USER1)
     assert [USER1, USER2] == cert.valid_principals
 
+    # Adding a principal containing the list delimiter should throw a ValueError
+    with pytest.raises(ValueError):
+        cert.add_valid_principal('user1,user2')
+    assert [USER1, USER2] == cert.valid_principals
+
 
 def test_serialize_no_principals():
     cert = get_basic_cert_builder_rsa()
@@ -117,6 +122,21 @@ def test_bogus_critical_options():
 
     with pytest.raises(ValueError):
         cert_builder.set_critical_option_source_addresses('')
+
+    with pytest.raises(ValueError):
+        cert_builder.set_critical_option_source_addresses('invalid_ip')
+
+    with pytest.raises(ValueError):
+        cert_builder.set_critical_option_source_addresses('10.0.0.0/8,')
+
+
+def test_critical_option_source_addresses():
+    cert_builder = get_basic_cert_builder_rsa()
+    cert_builder.set_critical_option_source_addresses('192.168.1.0/24')
+    assert '192.168.1.0/24' == cert_builder.critical_option_source_address
+
+    cert_builder.set_critical_option_source_addresses('10.0.0.0/8,172.1.1.1')
+    assert '10.0.0.0/8,172.1.1.1' == cert_builder.critical_option_source_address
 
 
 def test_rsa_user_cert_minimal():

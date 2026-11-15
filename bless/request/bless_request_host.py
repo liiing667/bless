@@ -44,8 +44,15 @@ class BlessHostSchema(Schema):
             hostname_validation = HOSTNAME_VALIDATION_OPTIONS[self.context[HOSTNAME_VALIDATION_OPTION]]
         else:
             hostname_validation = HOSTNAME_VALIDATION_OPTIONS[HOSTNAME_VALIDATION_DEFAULT]
-        for hostname in hostnames.split(','):
+        hostname_list = hostnames.split(',')
+        for hostname in hostname_list:
             validate_hostname(hostname, hostname_validation)
+            if not hostname:
+                # validate_hostname() permits empty strings when validation is disabled, but the
+                # SSH Certificate Builder cannot encode an empty principal.
+                raise ValidationError('Invalid hostname "".')
+        if len(hostname_list) != len(set(hostname_list)):
+            raise ValidationError('Duplicate hostnames are not allowed.')
 
 
 class BlessHostRequest:

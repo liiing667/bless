@@ -114,6 +114,15 @@ INVALID_TEST_REQUEST_MULTIPLE_PRINCIPALS = {
     "bastion_user_ip": "127.0.0.1"
 }
 
+INVALID_TEST_REQUEST_DUPLICATE_REMOTE_USERNAMES = {
+    "remote_usernames": "user,user",
+    "public_key_to_sign": EXAMPLE_RSA_PUBLIC_KEY,
+    "command": "ssh user@server",
+    "bastion_ips": "127.0.0.1",
+    "bastion_user": "user",
+    "bastion_user_ip": "127.0.0.1"
+}
+
 INVALID_TEST_REQUEST_USERNAME_INVALID = {
     "remote_usernames": "user",
     "public_key_to_sign": EXAMPLE_RSA_PUBLIC_KEY,
@@ -393,6 +402,14 @@ def test_invalid_kmsauth_request():
 
 def test_invalid_request():
     output = lambda_handler_user(INVALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    assert output['errorType'] == 'InputValidationError'
+
+
+def test_invalid_request_duplicate_remote_usernames():
+    output = lambda_handler_user(INVALID_TEST_REQUEST_DUPLICATE_REMOTE_USERNAMES, context=Context,
                             ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
                             entropy_check=False,
                             config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))

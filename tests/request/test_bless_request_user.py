@@ -164,6 +164,30 @@ def test_invalid_multiple_principals(test_input):
     assert str(e.value) == 'Principal contains invalid characters.'
 
 
+@pytest.mark.parametrize("test_input", [
+    ('uservalid,uservalid'),
+    ('uservalid,uservalid2,uservalid'),
+])
+def test_invalid_multiple_principals_with_duplicates(test_input):
+    with pytest.raises(ValidationError) as e:
+        BlessUserSchema().validate_remote_usernames(test_input)
+    assert str(e.value) == 'Duplicate remote usernames are not allowed.'
+
+
+@pytest.mark.parametrize("test_input", [
+    (''),
+    (','),
+    ('uservalid,'),
+    ('uservalid,,uservalid2'),
+])
+def test_invalid_multiple_principals_with_empty(test_input):
+    schema = BlessUserSchema()
+    schema.context[REMOTE_USERNAMES_VALIDATION_OPTION] = USERNAME_VALIDATION_OPTIONS.disabled.name
+    with pytest.raises(ValidationError) as e:
+        schema.validate_remote_usernames(test_input)
+    assert str(e.value) == 'Principal contains invalid characters.'
+
+
 def test_invalid_user_with_default_context_of_useradd():
     with pytest.raises(ValidationError) as e:
         BlessUserSchema().validate_bastion_user('user#invalid')
