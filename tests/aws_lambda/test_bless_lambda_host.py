@@ -51,3 +51,13 @@ def test_invalid_request():
                                  entropy_check=False,
                                  config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
     assert output['errorType'] == 'InputValidationError'
+
+
+def test_negative_validity_rejected(monkeypatch):
+    monkeypatch.setenv('bless_options_server_certificate_validity_after_seconds', '-1')
+    output = lambda_handler_host(VALID_TEST_REQUEST, context=Context,
+                                 ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                                 entropy_check=False,
+                                 config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    assert output['errorType'] == 'ClientError'
+    assert 'certificate' not in output

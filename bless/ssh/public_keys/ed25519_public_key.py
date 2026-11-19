@@ -5,9 +5,14 @@
 """
 import base64
 import hashlib
+import struct
 
 from bless.ssh.public_keys.ssh_public_key import SSHPublicKey, SSHPublicKeyType
-from cryptography.hazmat.primitives.serialization import ssh
+
+
+def _ssh_read_next_string(data):
+    (str_len,) = struct.unpack('>I', data[:4])
+    return data[4:4 + str_len], data[4 + str_len:]
 
 
 class ED25519PublicKey(SSHPublicKey):
@@ -46,7 +51,7 @@ class ED25519PublicKey(SSHPublicKey):
         except TypeError:
             raise ValueError('Key is not in the proper format.')
 
-        inner_key_type, rest = ssh._ssh_read_next_string(decoded_data)
+        inner_key_type, rest = _ssh_read_next_string(decoded_data)
 
         if inner_key_type != key_type.encode("utf-8"):
             raise ValueError(
@@ -54,7 +59,7 @@ class ED25519PublicKey(SSHPublicKey):
             )
 
         # ed25519 public key is a single string https://tools.ietf.org/html/rfc8032#section-5.1.5
-        self.a, rest = ssh._ssh_read_next_string(rest)
+        self.a, rest = _ssh_read_next_string(rest)
 
         key_bytes = base64.b64decode(split_ssh_public_key[1])
         fingerprint = hashlib.md5(key_bytes).hexdigest()

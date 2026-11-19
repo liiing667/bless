@@ -43,6 +43,8 @@ def lambda_handler_host(
                                                         SERVER_CERTIFICATE_VALIDITY_BEFORE_SEC_OPTION)
     certificate_validity_after_seconds = config.getint(BLESS_OPTIONS_SECTION,
                                                        SERVER_CERTIFICATE_VALIDITY_AFTER_SEC_OPTION)
+    if certificate_validity_before_seconds < 0 or certificate_validity_after_seconds < 0:
+        return error_response('ClientError', 'certificate validity seconds must not be negative')
 
     ca_private_key = config.getprivatekey()
 

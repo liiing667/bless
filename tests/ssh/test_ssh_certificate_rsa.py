@@ -1,7 +1,15 @@
 import base64
 
 import pytest
-from cryptography.hazmat.primitives.serialization.ssh import _ssh_read_next_string
+try:
+    from cryptography.hazmat.primitives.serialization.ssh import _ssh_read_next_string
+except ImportError:
+    import struct
+
+    def _ssh_read_next_string(data):
+        (str_len,) = struct.unpack('>I', data[:4])
+        return data[4:4 + str_len], data[4 + str_len:]
+
 
 from bless.ssh.certificate_authorities.rsa_certificate_authority import RSACertificateAuthority
 from bless.ssh.certificates.rsa_certificate_builder import RSACertificateBuilder

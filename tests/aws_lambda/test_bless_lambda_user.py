@@ -1,4 +1,6 @@
 import os
+import base64
+import struct
 import zlib
 
 import pytest
@@ -12,6 +14,37 @@ from tests.ssh.vectors import EXAMPLE_RSA_PUBLIC_KEY, RSA_CA_PRIVATE_KEY_PASSWOR
 class Context(object):
     aws_request_id = 'bogus aws_request_id'
     invoked_function_arn = 'bogus invoked_function_arn'
+
+
+def _read_ssh_string(data):
+    (str_len,) = struct.unpack('>I', data[:4])
+    return data[4:4 + str_len], data[4 + str_len:]
+
+
+def _certificate_validity_and_extensions(cert_file):
+    """
+    Walks an RSA SSH Certificate body and returns
+    (valid_after, valid_before, [extension names]).
+    """
+    body = base64.b64decode(cert_file.split(' ')[1])
+    _, remainder = _read_ssh_string(body)  # cert key type
+    _, remainder = _read_ssh_string(remainder)  # nonce
+    _, remainder = _read_ssh_string(remainder)  # e
+    _, remainder = _read_ssh_string(remainder)  # n
+    remainder = remainder[8:]  # serial
+    remainder = remainder[4:]  # cert type
+    _, remainder = _read_ssh_string(remainder)  # key id
+    _, remainder = _read_ssh_string(remainder)  # valid principals
+    valid_after, valid_before = struct.unpack('>QQ', remainder[:16])
+    remainder = remainder[16:]
+    _, remainder = _read_ssh_string(remainder)  # critical options
+    extensions_blob, remainder = _read_ssh_string(remainder)  # extensions
+    extensions = []
+    while extensions_blob:
+        name, extensions_blob = _read_ssh_string(extensions_blob)
+        _, extensions_blob = _read_ssh_string(extensions_blob)
+        extensions.append(name.decode('utf-8'))
+    return valid_after, valid_before, extensions
 
 
 VALID_TEST_REQUEST = {
@@ -463,6 +496,84 @@ def test_local_request_with_empty_certificate_extensions():
                             config_file=os.path.join(os.path.dirname(__file__),
                                                      'bless-test-with-certificate-extensions-empty.cfg'))
     assert output['certificate'].startswith('ssh-rsa-cert-v01@openssh.com ')
+    _, _, extensions = _certificate_validity_and_extensions(output['certificate'])
+    assert [] == extensions
+
+
+def test_local_request_with_blank_certificate_extensions_not_widened():
+    # "certificate_extensions = ," parses to zero extension names.  The issued
+    # certificate must have no extensions instead of inheriting the permissive
+    # ssh-keygen default permit-* set from the certificate builder.
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__),
+                                                     'bless-test-with-certificate-extensions-blank.cfg'))
+    assert output['certificate'].startswith('ssh-rsa-cert-v01@openssh.com ')
+    _, _, extensions = _certificate_validity_and_extensions(output['certificate'])
+    assert [] == extensions
+
+
+def test_local_request_with_blank_certificate_extensions_from_environment_not_widened(monkeypatch):
+    monkeypatch.setenv('bless_options_certificate_extensions', ' , ')
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    assert output['certificate'].startswith('ssh-rsa-cert-v01@openssh.com ')
+    _, _, extensions = _certificate_validity_and_extensions(output['certificate'])
+    assert [] == extensions
+
+
+def test_local_request_extensions_match_configured_policy():
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__),
+                                                     'bless-test-with-certificate-extensions.cfg'))
+    _, _, extensions = _certificate_validity_and_extensions(output['certificate'])
+    assert ['permit-pty', 'permit-user-rc'] == extensions
+
+
+def test_local_request_default_extensions_unchanged():
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    _, _, extensions = _certificate_validity_and_extensions(output['certificate'])
+    assert ['permit-X11-forwarding', 'permit-agent-forwarding', 'permit-port-forwarding',
+            'permit-pty', 'permit-user-rc'] == extensions
+
+
+def test_local_request_validity_window_matches_config_snapshot(monkeypatch):
+    monkeypatch.setenv('bless_options_certificate_validity_before_seconds', '10')
+    monkeypatch.setenv('bless_options_certificate_validity_after_seconds', '20')
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    valid_after, valid_before, _ = _certificate_validity_and_extensions(output['certificate'])
+    assert 30 == valid_before - valid_after
+
+
+def test_local_request_negative_validity_after_rejected(monkeypatch):
+    monkeypatch.setenv('bless_options_certificate_validity_after_seconds', '-1')
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    assert output['errorType'] == 'ClientError'
+    assert 'certificate' not in output
+
+
+def test_local_request_negative_validity_before_rejected(monkeypatch):
+    monkeypatch.setenv('bless_options_certificate_validity_before_seconds', '-1')
+    output = lambda_handler_user(VALID_TEST_REQUEST, context=Context,
+                            ca_private_key_password=RSA_CA_PRIVATE_KEY_PASSWORD,
+                            entropy_check=False,
+                            config_file=os.path.join(os.path.dirname(__file__), 'bless-test.cfg'))
+    assert output['errorType'] == 'ClientError'
+    assert 'certificate' not in output
 
 
 def test_local_request_with_multiple_principals():

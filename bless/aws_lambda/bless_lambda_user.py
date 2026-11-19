@@ -61,6 +61,9 @@ def lambda_handler_user(
                                                         CERTIFICATE_VALIDITY_BEFORE_SEC_OPTION)
     certificate_validity_after_seconds = config.getint(BLESS_OPTIONS_SECTION,
                                                        CERTIFICATE_VALIDITY_AFTER_SEC_OPTION)
+    if certificate_validity_before_seconds < 0 or certificate_validity_after_seconds < 0:
+        return error_response('ClientError', 'certificate validity seconds must not be negative')
+
     ca_private_key = config.getprivatekey()
     certificate_extensions = config.get(BLESS_OPTIONS_SECTION, CERTIFICATE_EXTENSIONS_OPTION)
 
@@ -169,12 +172,16 @@ def lambda_handler_user(
     cert_builder.set_valid_before(valid_before)
     cert_builder.set_valid_after(valid_after)
 
+    # Extensions are decided only by the merged config snapshot.  Always set the
+    # extension set explicitly so a configured value that parses to no extension
+    # names (e.g. "certificate_extensions = ,") cannot fall back to the
+    # certificate builder's permissive ssh-keygen default extensions.
+    cert_builder.clear_extensions()
     if certificate_extensions:
         for e in certificate_extensions.split(','):
+            e = e.strip()
             if e:
                 cert_builder.add_extension(e)
-    else:
-        cert_builder.clear_extensions()
 
     # cert_builder is needed to obtain the SSH public key's fingerprint
     key_id = 'request[{}] for[{}] from[{}] command[{}] ssh_key[{}]  ca[{}] valid_to[{}]'.format(
