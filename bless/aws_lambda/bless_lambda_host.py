@@ -5,8 +5,9 @@
 """
 import time
 
+from bless.audit.audit_ledger import AuditLedgerError
 from bless.aws_lambda.bless_lambda_common import success_response, error_response, set_logger, check_entropy, \
-    setup_lambda_cache
+    setup_lambda_cache, issue_certificate_transaction
 from bless.config.bless_config import BLESS_OPTIONS_SECTION, SERVER_CERTIFICATE_VALIDITY_BEFORE_SEC_OPTION, \
     SERVER_CERTIFICATE_VALIDITY_AFTER_SEC_OPTION, HOSTNAME_VALIDATION_OPTION
 from bless.request.bless_request_host import BlessHostSchema
@@ -92,11 +93,26 @@ def lambda_handler_host(
     )
 
     cert_builder.set_key_id(key_id)
-    cert = cert_builder.get_cert_file()
+
+    # Commit the unique audit record before the certificate is returned to the caller.  The
+    # serial embedded in the signed certificate is the revocation identity recorded in the
+    # audit ledger, so a returned certificate is always traceable and revocable.
+    try:
+        cert, serial = issue_certificate_transaction(
+            config, cert_builder,
+            audit_fields={
+                'certificate_type': 'host',
+                'request_id': context.aws_request_id,
+                'hostnames': request.hostnames,
+            })
+    except AuditLedgerError as e:
+        logger.error('Refusing to return certificate without a committed audit record: {}'.format(e))
+        return error_response('AuditError',
+                              'Certificate issuance could not be audited; no certificate was issued')
 
     logger.info(
-        'Issued a server cert to hostnames[{}] with key_id[{}] and '
+        'Issued a server cert to hostnames[{}] with serial[{}] key_id[{}] and '
         'valid_from[{}])'.format(
-            request.hostnames, key_id,
+            request.hostnames, serial, cert_builder.key_id,
             time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime(valid_after))))
     return success_response(cert)

@@ -7,6 +7,7 @@ import configparser
 import base64
 import os
 import re
+import tempfile
 import zlib
 import bz2
 
@@ -78,6 +79,9 @@ IAM_GROUP_NAME_VALIDATION_FORMAT_DEFAULT = 'ssh-{}'
 REMOTE_USERNAMES_BLACKLIST_OPTION = 'remote_usernames_blacklist'
 REMOTE_USERNAMES_BLACKLIST_DEFAULT = None
 
+AUDIT_LEDGER_FILE_OPTION = 'audit_ledger_file'
+AUDIT_LEDGER_FILE_DEFAULT = os.path.join(tempfile.gettempdir(), 'bless_audit_ledger.jsonl')
+
 
 class BlessConfig(configparser.RawConfigParser, object):
     def __init__(self, aws_region, config_file):
@@ -111,7 +115,8 @@ class BlessConfig(configparser.RawConfigParser, object):
                     CA_PRIVATE_KEY_COMPRESSION_OPTION: CA_PRIVATE_KEY_COMPRESSION_OPTION_DEFAULT,
                     SERVER_CERTIFICATE_VALIDITY_BEFORE_SEC_OPTION: SERVER_CERTIFICATE_VALIDITY_BEFORE_SEC_DEFAULT,
                     SERVER_CERTIFICATE_VALIDITY_AFTER_SEC_OPTION: SERVER_CERTIFICATE_VALIDITY_AFTER_SEC_DEFAULT,
-                    HOSTNAME_VALIDATION_OPTION: HOSTNAME_VALIDATION_DEFAULT
+                    HOSTNAME_VALIDATION_OPTION: HOSTNAME_VALIDATION_DEFAULT,
+                    AUDIT_LEDGER_FILE_OPTION: AUDIT_LEDGER_FILE_DEFAULT
                     }
         configparser.RawConfigParser.__init__(self, defaults=defaults)
         self.read(config_file)

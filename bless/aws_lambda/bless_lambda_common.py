@@ -5,11 +5,13 @@
 """
 import logging
 import os
+import time
 
 import boto3
+from bless.audit.audit_ledger import AuditLedger, generate_serial
 from bless.cache.bless_lambda_cache import BlessLambdaCache
 from bless.config.bless_config import BLESS_OPTIONS_SECTION, LOGGING_LEVEL_OPTION, ENTROPY_MINIMUM_BITS_OPTION, \
-    RANDOM_SEED_BYTES_OPTION
+    RANDOM_SEED_BYTES_OPTION, AUDIT_LEDGER_FILE_OPTION
 
 global_bless_cache = None
 
@@ -25,6 +27,52 @@ def error_response(error_type, error_message):
         'errorType': error_type,
         'errorMessage': error_message
     }
+
+
+def issue_certificate_transaction(config, cert_builder, audit_fields=None,
+                                  bypass_time_validity_check=False):
+    """
+    Atomically issue an SSH Certificate and its audit record.
+
+    A unique serial number is embedded into the signed certificate body (and its key_id) and
+    committed to the append-only audit ledger before the certificate is returned.  The serial
+    is the shared revocation identity binding the certificate to its ledger record, so the two
+    can never diverge: a certificate is only ever returned to the caller after its unique audit
+    record has been durably committed.
+
+    :param config: The BlessConfig for this deployment.
+    :param cert_builder: A fully populated SSHCertificateBuilder (principals, validity, key_id).
+    :param audit_fields: Optional dict of request-specific attributes to include in the audit
+    record.
+    :param bypass_time_validity_check: Passed through to the certificate builder.
+    :return: Tuple of (certificate file contents, serial number).
+    :raises bless.audit.audit_ledger.AuditLedgerError: If the audit record cannot be committed.
+    The certificate must not be returned to the caller in that case.
+    """
+    serial = generate_serial()
+    cert_builder.set_serial(serial)
+
+    base_key_id = cert_builder.key_id if cert_builder.key_id else ''
+    key_id = 'serial[{}] {}'.format(serial, base_key_id).strip()
+    cert_builder.set_key_id(key_id)
+
+    cert = cert_builder.get_cert_file(bypass_time_validity_check)
+
+    record = dict(audit_fields) if audit_fields else {}
+    record.update({
+        'serial': serial,
+        'key_id': key_id,
+        'fingerprint': cert_builder.ssh_public_key.fingerprint,
+        'principals': list(cert_builder.valid_principals),
+        'valid_after': cert_builder.valid_after,
+        'valid_before': cert_builder.valid_before,
+        'issued_at': int(time.time()),
+    })
+
+    ledger = AuditLedger(config.get(BLESS_OPTIONS_SECTION, AUDIT_LEDGER_FILE_OPTION))
+    ledger.commit_issuance(record)
+
+    return cert, serial
 
 
 def set_logger(config):
