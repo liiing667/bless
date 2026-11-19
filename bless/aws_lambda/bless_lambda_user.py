@@ -159,31 +159,38 @@ def lambda_handler_user(
         else:
             return error_response('InputValidationError', 'Invalid request, missing kmsauth token')
 
-    # Build the cert
-    ca = get_ssh_certificate_authority(ca_private_key, ca_private_key_password)
-    cert_builder = get_ssh_certificate_builder(ca, SSHCertificateType.USER,
-                                               request.public_key_to_sign)
-    for username in request.remote_usernames.split(','):
-        cert_builder.add_valid_principal(username)
+    # Build and sign the cert. This is all or nothing: any failure returns an
+    # error response and must not leave a partially issued certificate or write
+    # an "issued" audit entry.
+    try:
+        ca = get_ssh_certificate_authority(ca_private_key, ca_private_key_password)
+        cert_builder = get_ssh_certificate_builder(ca, SSHCertificateType.USER,
+                                                   request.public_key_to_sign)
+        for username in request.remote_usernames.split(','):
+            cert_builder.add_valid_principal(username)
 
-    cert_builder.set_valid_before(valid_before)
-    cert_builder.set_valid_after(valid_after)
+        cert_builder.set_valid_before(valid_before)
+        cert_builder.set_valid_after(valid_after)
 
-    if certificate_extensions:
-        for e in certificate_extensions.split(','):
-            if e:
-                cert_builder.add_extension(e)
-    else:
-        cert_builder.clear_extensions()
+        if certificate_extensions:
+            for e in certificate_extensions.split(','):
+                if e:
+                    cert_builder.add_extension(e)
+        else:
+            cert_builder.clear_extensions()
 
-    # cert_builder is needed to obtain the SSH public key's fingerprint
-    key_id = 'request[{}] for[{}] from[{}] command[{}] ssh_key[{}]  ca[{}] valid_to[{}]'.format(
-        context.aws_request_id, request.bastion_user, request.bastion_user_ip, request.command,
-        cert_builder.ssh_public_key.fingerprint, context.invoked_function_arn,
-        time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime(valid_before)))
-    cert_builder.set_critical_option_source_addresses(request.bastion_ips)
-    cert_builder.set_key_id(key_id)
-    cert = cert_builder.get_cert_file(bypass_time_validity_check)
+        # cert_builder is needed to obtain the SSH public key's fingerprint
+        key_id = 'request[{}] for[{}] from[{}] command[{}] ssh_key[{}]  ca[{}] valid_to[{}]'.format(
+            context.aws_request_id, request.bastion_user, request.bastion_user_ip, request.command,
+            cert_builder.ssh_public_key.fingerprint, context.invoked_function_arn,
+            time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime(valid_before)))
+        cert_builder.set_critical_option_source_addresses(request.bastion_ips)
+        cert_builder.set_key_id(key_id)
+        cert = cert_builder.get_cert_file(bypass_time_validity_check)
+    except Exception as e:
+        logger.error('Certificate issuance failed for [user: {0}, bastion_ips:{1}]: {2}'.format(
+            request.bastion_user, request.bastion_user_ip, str(e)))
+        return error_response('CertificateIssuanceError', str(e))
 
     logger.info(
         'Issued a cert to bastion_ips[{}] for remote_usernames[{}] with key_id[{}] and '

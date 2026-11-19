@@ -204,10 +204,13 @@ class SSHCertificateBuilder(object):
         :return: String with all of the required SSH Certificate contents, that can be written
         to a file.
         """
+        signed_cert = self._sign_cert(bypass_time_validity_check)
+        if not signed_cert:
+            raise ValueError('Certificate could not be signed.')
         file_contents = (
             "{} {} {}"
         ).format(self.cert_key_type,
-                 str(base64.b64encode(self._sign_cert(bypass_time_validity_check)), encoding='ascii'),
+                 str(base64.b64encode(signed_cert), encoding='ascii'),
                  self.public_key_comment)
         return file_contents
 
@@ -247,8 +250,13 @@ class SSHCertificateBuilder(object):
                 self._validate_cert_properties()
             body_bytes = self._serialize_certificate_body()
 
-            # sign the body
-            sig_bytes = self.ca.sign(body_bytes)
+            # sign the body. Signing is all or nothing: a failure must never
+            # leave a partially issued certificate cached on this builder.
+            try:
+                sig_bytes = self.ca.sign(body_bytes)
+            except Exception:
+                self.signed_cert = None
+                raise
             self.signed_cert = body_bytes + sig_bytes
         return self.signed_cert
 

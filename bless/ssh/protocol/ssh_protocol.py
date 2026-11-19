@@ -83,6 +83,22 @@ def pack_ssh_uint32(i):
     return struct.pack('>I', i)
 
 
+def read_ssh_string(data):
+    """
+    Unpacks one arbitrary length binary string from the front of ``data``.
+    See Section 5 of https://www.ietf.org/rfc/rfc4251.txt for more information.
+    :param data: bytes beginning with a uint32 string length followed by that
+    many string bytes.
+    :return: a tuple of (string_bytes, remaining_bytes).
+    """
+    if len(data) < 4:
+        raise ValueError('Truncated SSH string: missing length prefix.')
+    str_len = struct.unpack('>I', data[:4])[0]
+    if len(data) < 4 + str_len:
+        raise ValueError('Truncated SSH string: declared length exceeds the data.')
+    return data[4:4 + str_len], data[4 + str_len:]
+
+
 def _hex_characters_length(mpint):
     """
     Subroutine for pack_ssh_mpint.

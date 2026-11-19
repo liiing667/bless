@@ -39,8 +39,12 @@ USERNAME_VALIDATION_OPTIONS = Enum('UserNameValidationOptions',
 
 
 def validate_ips(ips):
+    if not ips:
+        raise ValidationError('Invalid IP address.')
     try:
         for ip in ips.split(','):
+            if not ip:
+                raise ValueError('Empty IP address.')
             ipaddress.ip_network(ip, strict=True)
     except ValueError:
         raise ValidationError('Invalid IP address.')
@@ -52,6 +56,8 @@ def validate_user(user, username_validation, username_blacklist=None):
             raise ValidationError('Username contains invalid characters.')
 
     if username_validation == USERNAME_VALIDATION_OPTIONS.disabled:
+        if not user:
+            raise ValidationError('Invalid username.')
         return
     elif username_validation == USERNAME_VALIDATION_OPTIONS.email:
         Email('Invalid email address.').__call__(user)

@@ -74,25 +74,32 @@ def lambda_handler_host(
     valid_before = current_time + certificate_validity_after_seconds
     valid_after = current_time - certificate_validity_before_seconds
 
-    # Build the cert
-    ca = get_ssh_certificate_authority(ca_private_key, ca_private_key_password)
-    cert_builder = get_ssh_certificate_builder(ca, SSHCertificateType.HOST,
-                                               request.public_key_to_sign)
+    # Build and sign the cert. This is all or nothing: any failure returns an
+    # error response and must not leave a partially issued certificate or write
+    # an "issued" audit entry.
+    try:
+        ca = get_ssh_certificate_authority(ca_private_key, ca_private_key_password)
+        cert_builder = get_ssh_certificate_builder(ca, SSHCertificateType.HOST,
+                                                   request.public_key_to_sign)
 
-    for hostname in request.hostnames.split(','):
-        cert_builder.add_valid_principal(hostname)
+        for hostname in request.hostnames.split(','):
+            cert_builder.add_valid_principal(hostname)
 
-    cert_builder.set_valid_before(valid_before)
-    cert_builder.set_valid_after(valid_after)
+        cert_builder.set_valid_before(valid_before)
+        cert_builder.set_valid_after(valid_after)
 
-    # cert_builder is needed to obtain the SSH public key's fingerprint
-    key_id = 'request[{}] ssh_key[{}] ca[{}] valid_to[{}]'.format(
-        context.aws_request_id, cert_builder.ssh_public_key.fingerprint, context.invoked_function_arn,
-        time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime(valid_before))
-    )
+        # cert_builder is needed to obtain the SSH public key's fingerprint
+        key_id = 'request[{}] ssh_key[{}] ca[{}] valid_to[{}]'.format(
+            context.aws_request_id, cert_builder.ssh_public_key.fingerprint, context.invoked_function_arn,
+            time.strftime("%Y/%m/%d %H:%M:%S", time.gmtime(valid_before))
+        )
 
-    cert_builder.set_key_id(key_id)
-    cert = cert_builder.get_cert_file()
+        cert_builder.set_key_id(key_id)
+        cert = cert_builder.get_cert_file()
+    except Exception as e:
+        logger.error('Server certificate issuance failed for hostnames[{}]: {}'.format(
+            request.hostnames, str(e)))
+        return error_response('CertificateIssuanceError', str(e))
 
     logger.info(
         'Issued a server cert to hostnames[{}] with key_id[{}] and '

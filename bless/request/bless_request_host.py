@@ -45,6 +45,8 @@ class BlessHostSchema(Schema):
         else:
             hostname_validation = HOSTNAME_VALIDATION_OPTIONS[HOSTNAME_VALIDATION_DEFAULT]
         for hostname in hostnames.split(','):
+            if not hostname:
+                raise ValidationError('Invalid hostname.')
             validate_hostname(hostname, hostname_validation)
 
 

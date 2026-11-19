@@ -7,6 +7,7 @@ htmlcov/
 libs/
 publish/
 venv/
+.pylibs/
 aws_lambda_libs/
 lambda_configs/
 .pytest_cache/
